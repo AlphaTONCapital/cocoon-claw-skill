@@ -120,7 +120,7 @@ Agent: [Uses cocoon.sh stream for real-time output]
 
 ## Features
 
-- **Zero dependencies** — Works with just `curl` (optional `jq` for prettier output)
+- **Minimal dependencies** — Requires only `curl`. Uses `jq` or `python3` for JSON escaping when available, falls back to `sed`
 - **Auto model detection** — Discovers available models automatically
 - **Streaming support** — Token-by-token output via SSE
 - **Cocoon-specific params** — `--max-coefficient`, `--timeout`, `--debug`
@@ -130,12 +130,13 @@ Agent: [Uses cocoon.sh stream for real-time output]
 ## Repository Structure
 
 ```
-claude-cocoon/
+cocoon-claw-skill/
 ├── README.md              # This file
 ├── LICENSE                # MIT License
 ├── SKILL.md               # OpenClaw skill definition
 ├── scripts/
-│   └── cocoon.sh          # CLI tool for all Cocoon operations
+│   ├── cocoon.sh          # CLI tool for all Cocoon operations
+│   └── test.sh            # Test suite
 └── references/
     └── api.md             # Complete Cocoon API reference
 ```
