@@ -5,13 +5,19 @@ set -euo pipefail
 ENDPOINT="${COCOON_ENDPOINT:-http://127.0.0.1:10000}"
 
 # -- Temp file handling (race-safe) --
-_tmpfile=""
-_cleanup() { [[ -n "$_tmpfile" ]] && rm -f "$_tmpfile"; }
+_tmpfiles=()
+_cleanup() {
+    if [[ ${#_tmpfiles[@]} -gt 0 ]]; then
+        rm -f "${_tmpfiles[@]}"
+    fi
+}
 trap _cleanup EXIT
 
 _mktmp() {
-    _tmpfile=$(mktemp) || { echo "ERROR: Cannot create temp file" >&2; exit 1; }
-    echo "$_tmpfile"
+    local f
+    f=$(mktemp) || { echo "ERROR: Cannot create temp file" >&2; exit 1; }
+    _tmpfiles+=("$f")
+    echo "$f"
 }
 
 # -- Shared HTTP helper --
@@ -57,6 +63,12 @@ parse_args() {
         esac
     done
     # Validate numerics
+    if ! [[ "$MAX_TOKENS" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: --max-tokens must be a positive integer, got: $MAX_TOKENS" >&2; exit 1
+    fi
+    if ! [[ "$TEMPERATURE" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+        echo "ERROR: --temperature must be a number, got: $TEMPERATURE" >&2; exit 1
+    fi
     if [[ -n "$MAX_COEFF" ]] && ! [[ "$MAX_COEFF" =~ ^[0-9]+$ ]]; then
         echo "ERROR: --max-coefficient must be a non-negative integer, got: $MAX_COEFF" >&2; exit 1
     fi
@@ -83,9 +95,9 @@ resolve_model() {
 # -- Cocoon-specific JSON fields --
 cocoon_extras() {
     local extras=""
-    [[ -n "$MAX_COEFF" ]] && extras="${extras},\"max_coefficient\":${MAX_COEFF}"
-    [[ -n "$TIMEOUT" ]]   && extras="${extras},\"timeout\":${TIMEOUT}"
-    [[ "$DEBUG" == "true" ]] && extras="${extras},\"enable_debug\":true"
+    if [[ -n "$MAX_COEFF" ]]; then extras="${extras},\"max_coefficient\":${MAX_COEFF}"; fi
+    if [[ -n "$TIMEOUT" ]];   then extras="${extras},\"timeout\":${TIMEOUT}"; fi
+    if [[ "$DEBUG" == "true" ]]; then extras="${extras},\"enable_debug\":true"; fi
     echo "$extras"
 }
 
@@ -99,7 +111,9 @@ _run_inference() {
 
     local model
     model=$(resolve_model)
-    model=$(echo "$model" | xargs) # trim whitespace
+    # trim leading/trailing whitespace (safe for special chars)
+    model="${model#"${model%%[![:space:]]*}"}"
+    model="${model%"${model##*[![:space:]]}"}"
     if [[ -z "$model" ]]; then
         echo "ERROR: No model available. Specify --model or ensure Cocoon has loaded models." >&2
         exit 1
@@ -145,7 +159,7 @@ case "${1:-}" in
             exit 1
         else
             echo "ERROR: Cocoon returned HTTP ${_http_code}" >&2
-            [[ -n "$_http_body" ]] && echo "$_http_body"
+            if [[ -n "$_http_body" ]]; then echo "$_http_body"; fi
             exit 1
         fi
         ;;
@@ -154,7 +168,7 @@ case "${1:-}" in
         curl_checked "${ENDPOINT}/v1/models"
         if [[ "$_http_code" != "200" ]]; then
             echo "ERROR: /v1/models returned HTTP ${_http_code}" >&2
-            [[ -n "$_http_body" ]] && echo "$_http_body" >&2
+            if [[ -n "$_http_body" ]]; then echo "$_http_body" >&2; fi
             exit 1
         fi
         echo "$_http_body"
@@ -179,7 +193,7 @@ case "${1:-}" in
         curl_checked "${ENDPOINT}/jsonstats"
         if [[ "$_http_code" != "200" ]]; then
             echo "ERROR: /jsonstats returned HTTP ${_http_code}" >&2
-            [[ -n "$_http_body" ]] && echo "$_http_body" >&2
+            if [[ -n "$_http_body" ]]; then echo "$_http_body" >&2; fi
             exit 1
         fi
         echo "$_http_body"

@@ -170,11 +170,37 @@ assert_fail "--max-coefficient rejects non-integer" \
 assert_fail "--timeout rejects non-number" \
     "$COCOON" chat "hello" --model test --timeout "not_a_number"
 
+# Valid numerics — use mock server so the command actually succeeds end-to-end
+rm -f /tmp/cocoon_test_payload
+start_mock 200 '{"choices":[{"message":{"content":"ok"}}]}'
 assert_ok "--max-coefficient accepts integer" \
-    bash -c "COCOON_ENDPOINT=http://127.0.0.1:1 $COCOON chat 'hi' --model test --max-coefficient 5 2>&1 || true"
+    env COCOON_ENDPOINT="http://127.0.0.1:${MOCK_PORT}" "$COCOON" chat 'hi' --model test --max-coefficient 5
+stop_mock
 
+rm -f /tmp/cocoon_test_payload
+start_mock 200 '{"choices":[{"message":{"content":"ok"}}]}'
 assert_ok "--timeout accepts decimal" \
-    bash -c "COCOON_ENDPOINT=http://127.0.0.1:1 $COCOON chat 'hi' --model test --timeout 30.5 2>&1 || true"
+    env COCOON_ENDPOINT="http://127.0.0.1:${MOCK_PORT}" "$COCOON" chat 'hi' --model test --timeout 30.5
+stop_mock
+
+# --max-tokens / --temperature validation
+assert_fail "--max-tokens rejects non-integer" \
+    "$COCOON" chat "hello" --model test --max-tokens abc
+
+assert_fail "--temperature rejects non-number" \
+    "$COCOON" chat "hello" --model test --temperature banana
+
+rm -f /tmp/cocoon_test_payload
+start_mock 200 '{"choices":[{"message":{"content":"ok"}}]}'
+assert_ok "--max-tokens accepts integer" \
+    env COCOON_ENDPOINT="http://127.0.0.1:${MOCK_PORT}" "$COCOON" chat 'hi' --model test --max-tokens 100
+stop_mock
+
+rm -f /tmp/cocoon_test_payload
+start_mock 200 '{"choices":[{"message":{"content":"ok"}}]}'
+assert_ok "--temperature accepts decimal" \
+    env COCOON_ENDPOINT="http://127.0.0.1:${MOCK_PORT}" "$COCOON" chat 'hi' --model test --temperature 0.5
+stop_mock
 
 # ============================================================
 echo ""
@@ -359,6 +385,83 @@ if [[ -f /tmp/cocoon_test_payload ]]; then
     rm -f /tmp/cocoon_test_payload
 else
     _red "  FAIL: no extras payload captured"; ((FAIL+=3))
+fi
+
+# ============================================================
+echo ""
+echo "=== resolve_model auto-detection tests ==="
+# ============================================================
+
+# Auto-detect model from /v1/models (mock returns models list for GET, then serves POST)
+# We need two requests: GET /v1/models (resolve) + POST /v1/chat/completions (inference)
+# Use a multi-request mock for this
+MOCK_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("",0)); print(s.getsockname()[1]); s.close()')
+rm -f /tmp/cocoon_test_payload
+python3 -c "
+import http.server
+
+class H(http.server.BaseHTTPRequestHandler):
+    count = 0
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(b'{\"data\":[{\"id\":\"AutoModel/Test-7B\",\"object\":\"model\"}]}')
+    def do_POST(self):
+        length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(length)
+        with open('/tmp/cocoon_test_payload', 'wb') as f:
+            f.write(body)
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(b'{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}')
+    def log_message(self, *a): pass
+
+s = http.server.HTTPServer(('127.0.0.1', ${MOCK_PORT}), H)
+s.handle_request()  # GET /v1/models
+s.handle_request()  # POST /v1/chat/completions
+" &
+MOCK_PID=$!
+sleep 0.2
+
+# Chat WITHOUT --model → should auto-detect AutoModel/Test-7B
+env COCOON_ENDPOINT="http://127.0.0.1:${MOCK_PORT}" "$COCOON" chat "auto test" >/dev/null 2>&1 || true
+sleep 0.2
+stop_mock
+
+if [[ -f /tmp/cocoon_test_payload ]]; then
+    payload=$(cat /tmp/cocoon_test_payload)
+    if [[ "$payload" == *'"AutoModel/Test-7B"'* ]]; then
+        _green "  PASS: resolve_model auto-detected model from /v1/models"; ((PASS++))
+    else
+        _red "  FAIL: resolve_model did not auto-detect — got: $payload"; ((FAIL++))
+    fi
+    rm -f /tmp/cocoon_test_payload
+else
+    _red "  FAIL: no payload for auto-detect test"; ((FAIL++))
+fi
+
+# No model available → should error
+assert_contains "no model available → error" "No model available" \
+    env COCOON_ENDPOINT="http://127.0.0.1:1" "$COCOON" chat "test"
+
+# ============================================================
+echo ""
+echo "=== json_escape sed fallback test ==="
+# ============================================================
+
+# Test the sed fallback by hiding jq and python3 from PATH
+_sed_result=$(PATH=/usr/bin:/bin bash -c '
+    # Ensure only sed is available (no jq, no python3)
+    unset -f json_escape 2>/dev/null
+    '"$(sed -n '/^json_escape()/,/^}/p' "$COCOON")"'
+    json_escape "say \"hello\" and back\\slash"
+' 2>/dev/null) || true
+if [[ "$_sed_result" == 'say \"hello\" and back\\slash' ]]; then
+    _green "  PASS: sed fallback escapes quotes and backslashes"; ((PASS++))
+else
+    _red "  FAIL: sed fallback — got: $_sed_result"; ((FAIL++))
 fi
 
 # ============================================================
