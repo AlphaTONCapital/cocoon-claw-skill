@@ -32,7 +32,20 @@ resolve_model() {
     if command -v jq &>/dev/null; then
         echo "$resp" | jq -r '.data[0].id // empty' 2>/dev/null
     else
-        echo "$resp" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4
+        echo "$resp" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1
+    fi
+}
+
+# Escape a string for safe JSON embedding (no outer quotes)
+json_escape() {
+    local raw="$1"
+    # Try jq first, then python3, then sed
+    if command -v jq &>/dev/null; then
+        printf '%s' "$raw" | jq -Rs . | sed 's/^"//;s/"$//'
+    elif command -v python3 &>/dev/null; then
+        printf '%s' "$raw" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read())[1:-1])'
+    else
+        printf '%s' "$raw" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g'
     fi
 }
 
@@ -48,12 +61,18 @@ cocoon_extras() {
 case "${1:-}" in
     health)
         echo "Checking Cocoon at ${ENDPOINT}..."
-        resp=$(curl -s --max-time 5 "${ENDPOINT}/stats" 2>/dev/null)
-        if [[ -n "$resp" ]]; then
-            echo "OK"
+        http_code=$(curl -s -o /tmp/cocoon_health -w "%{http_code}" --max-time 5 "${ENDPOINT}/jsonstats" 2>/dev/null)
+        resp=$(cat /tmp/cocoon_health 2>/dev/null)
+        rm -f /tmp/cocoon_health
+        if [[ "$http_code" == "200" ]]; then
+            echo "OK (HTTP ${http_code})"
             echo "$resp"
-        else
+        elif [[ "$http_code" == "000" ]]; then
             echo "ERROR: Cocoon client not responding at ${ENDPOINT}"
+            exit 1
+        else
+            echo "ERROR: Cocoon returned HTTP ${http_code}"
+            [[ -n "$resp" ]] && echo "$resp"
             exit 1
         fi
         ;;
@@ -81,11 +100,7 @@ case "${1:-}" in
             exit 1
         fi
         extras=$(cocoon_extras)
-        # Escape message for JSON
-        escaped=$(printf '%s' "$message" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null || printf '"%s"' "$message")
-        # Remove outer quotes if python3 added them, we add our own
-        escaped=${escaped#\"}
-        escaped=${escaped%\"}
+        escaped=$(json_escape "$message")
 
         curl -s "${ENDPOINT}/v1/chat/completions" \
             -H "Content-Type: application/json" \
@@ -106,9 +121,7 @@ case "${1:-}" in
             exit 1
         fi
         extras=$(cocoon_extras)
-        escaped=$(printf '%s' "$message" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null || printf '"%s"' "$message")
-        escaped=${escaped#\"}
-        escaped=${escaped%\"}
+        escaped=$(json_escape "$message")
 
         curl -sN "${ENDPOINT}/v1/chat/completions" \
             -H "Content-Type: application/json" \
@@ -129,9 +142,7 @@ case "${1:-}" in
             exit 1
         fi
         extras=$(cocoon_extras)
-        escaped=$(printf '%s' "$prompt" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' 2>/dev/null || printf '"%s"' "$prompt")
-        escaped=${escaped#\"}
-        escaped=${escaped%\"}
+        escaped=$(json_escape "$prompt")
 
         curl -s "${ENDPOINT}/v1/completions" \
             -H "Content-Type: application/json" \

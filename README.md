@@ -1,6 +1,6 @@
 # Cocoon Skill for OpenClaw
 
-[![GitHub](https://img.shields.io/badge/GitHub-AlphaTONCapital%2Fclaude--cocoon-blue)](https://github.com/AlphaTONCapital/claude-cocoon)
+[![GitHub](https://img.shields.io/badge/GitHub-AlphaTONCapital%2Fcocoon--claw--skill-blue)](https://github.com/AlphaTONCapital/cocoon-claw-skill)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![OpenClaw](https://img.shields.io/badge/works%20with-OpenClaw-orange)](https://openclaw.ai)
 
@@ -55,7 +55,7 @@ All traffic between Proxy and Worker is encrypted via **RA-TLS** (Remote Attesta
 ```bash
 # 1. Install the skill
 cd ~/oni/aton/logan/workspace/skills
-git clone https://github.com/AlphaTONCapital/claude-cocoon.git cocoon
+git clone https://github.com/AlphaTONCapital/cocoon-claw-skill.git cocoon
 
 # 2. Ensure a Cocoon client is running (default: localhost:10000)
 #    Or set a custom endpoint:
@@ -203,7 +203,7 @@ MIT — See [LICENSE](LICENSE) file.
 - **Cocoon**: https://github.com/TelegramMessenger/cocoon
 - **OpenClaw**: https://openclaw.ai
 - **TON**: https://ton.org
-- **This Repo**: https://github.com/AlphaTONCapital/claude-cocoon
+- **This Repo**: https://github.com/AlphaTONCapital/cocoon-claw-skill
 
 ---
 
